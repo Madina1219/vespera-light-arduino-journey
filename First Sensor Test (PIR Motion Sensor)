@@ -1,0 +1,21 @@
+.Used PIR to detect detect presence in the lab and trigger Vespera via MQTT.
+.During testing, I noticed that the PIR sensor took a long time to calibrate after powering on.
+.Even after calibration, the motion detection felt delayed,it didn’t react immediately when I moved or moved my hands in front of it.
+.I tried adjusting the code and some timing variables to make it more responsive, but I was still not getting the fast reaction I needed.
+.Despite reuploading and testing several times, the sensor response stayed inconsistent.
+.I realised the PIR sensor’s nature is to detect infrared changes (body heat movement) rather than instant gestures, which can naturally cause a short delay.
+
+ * Reflection
+.Because I only had two minutes to present my project on “Show and Tell” day, I felt that relying on a slower, unpredictable sensor could make my demo unreliable.
+.I wanted to show an immediate, visible response between my sensor input and Vespera’s light output.
+.That’s when I decided to move away from the PIR and look for a faster trigger method.
+.I went back to all the assessment guides and understood that my goal at this stage was to demonstrate understanding, not complexity, and reliability mattered more than ambition.
+
+*Lesson Learned
+.Not all sensors respond at the same speed. PIR sensors need time to calibrate and can be sensitive to environment temperature and movement distance.
+.Testing early helps identify performance issues before the final day.
+.Sometimes, simplifying the system leads to a clearer and more successful demonstration.
+
+*Next Step
+.I chose to switch to a MAX4466 microphone sensor, which could detect knock sounds and send data instantly.
+.This seemed a better option for my time-limited presentation, allowing me to demonstrate a quick and clear response.
