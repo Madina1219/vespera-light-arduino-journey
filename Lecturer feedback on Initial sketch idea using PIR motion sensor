@@ -1,0 +1,28 @@
+*Feedback Summary:
+.When I presented my first sketch,the lecturer appreciated the creativity and ambition behind combining two lights (the plume light box and the Vespera) into one responsive system.
+.However, I was advised to keep the interface simple because this was my first time building an IoT system and I was still learning the coding and MQTT communication basics.
+
+*Duncan encouraged me to:
+.Focus on understanding one sensor well (the PIR motion sensor) instead of trying to control two light outputs.
+.Prioritise data flow and MQTT connectivity over building a complex interface.
+.Ensure I could demonstrate a clear, working interaction during the short presentation time rather than multiple connected parts that might fail.
+
+*My Reflection:
+.At that point, I realised I was trying to do too much too soon.
+.I was excited about creating something visually impressive,making both lights react together,without yet understanding the technical feasibility or timing challenges.
+
+*This feedback helped me:
+.Refocus on learning the basics of sensor input and MQTT output.
+.Simplifying my design by choosing one sensor (the PIR) and one output (the Vespera).
+.Understand that simplicity and clarity are more valuable at this stage than complexity.
+
+*Action Taken After Feedback:
+.Removed the plume light from my main prototype concept.
+.Decided to repurpose only the box (as a physical casing for the Arduino) instead of wiring the light itself.
+.Concentrated on getting the motion-to-light connection via MQTT working.
+
+*Later, after testing and still facing calibration delays, I switched to a microphone sensor for a faster, simpler demonstration.
+
+*Lesson Learned:
+“Good design is not about doing more,it’s about doing the essential things well.”
+This moment of feedback reshaped how I think about connected environments,it taught me that the core goal is understanding the data relationship between sensor, device, and network, before expanding to complex systems.
