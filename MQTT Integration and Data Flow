@@ -1,0 +1,4 @@
+.Connected the Arduino to WiFi and published “knock” data to the MQTT broker.
+.Vespera subscribes to the topic and lights up blue-Red-Green when a knock is detected.
+.Demonstrates real-time interaction, sensor-data-network and response.
+.Data visualisation is powerful, it makes invisible signals visible.
