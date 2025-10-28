@@ -1,0 +1,385 @@
+*
+  MAX4466 3-Knock Trigger → Vespera Light Control (MQTT)
+  Board: Arduino MKR WiFi 1010
+  Mic:   MAX4466 analog mic (OUT → A0, VCC 3.3V, GND)
+
+  LATEST VERSION - Full Featured Code
+  
+  Behavior:
+    - LED stays ON to show system is active/ready
+    - Detect EXACTLY 3 quick knocks (timed)
+    - IMMEDIATE automatic display of Blue → Red → Green sequence
+    - 1 or 2 knocks will NOT trigger display
+    - NO cooldown - ready immediately after sequence
+    - Only triggers on exactly 3 quick knocks
+
+  Adjust:
+    - WIFI_SSID, WIFI_PASS, MQTT_SERVER settings
+    - lightId to match your assigned Vespera number
+    - THRESHOLD and knock timing parameters
+    
+  Copy this entire code to your Arduino IDE!
+*/
+
+#include <SPI.h>
+#include <WiFiNINA.h>
+#include <PubSubClient.h>
+
+// ------------ USER SETTINGS ------------
+const char* WIFI_SSID   = 
+const char* WIFI_PASS   = 
+
+const char* mqtt_server = 
+const int mqtt_port     = 
+const char* mqtt_username = 
+const char* mqtt_password = 
+
+// Set to your assigned Vespera light number (from Google Sheet)
+String lightId = "8";  // Change this to your assigned number
+// --------------------------------------
+
+// Vespera Configuration
+const int num_leds = 72;
+const int payload_size = num_leds * 3; // x3 for RGB
+byte RGBpayload[payload_size];
+
+// MQTT topic for Vespera
+String mqtt_topic = "student/CASA0014/luminaire/" + lightId;
+
+// Pins
+const int MIC_PIN = A0;
+const int LED_PIN = LED_BUILTIN;
+
+// Knock detection tuning - ADJUST THESE IF NOT DETECTING
+const int THRESHOLD = 30;                   // spike over baseline (VERY sensitive - adjust up if too sensitive)
+const unsigned long DEBOUNCE_MS = 80;       // ignore re-knocks within this time
+const unsigned long MIN_GAP_MS  = 100;      // min time between valid knocks
+const unsigned long MAX_GAP_MS  = 1200;     // max time between valid knocks
+const int REQUIRED_KNOCKS = 3;              // MUST be exactly 3 knocks
+
+// Debug mode - set to true to see mic readings
+const bool DEBUG_MIC = true;
+
+// Color display timing - VERY QUICK
+const unsigned long COLOR_HOLD_MS = 300;    // 300ms per color (very fast)
+
+// Baseline tracking
+const float BASELINE_ALPHA = 0.01f;
+
+// WiFi / MQTT
+WiFiClient wifiClient;
+PubSubClient mqttClient(wifiClient);
+
+// State
+float baseline = 512.0;
+int knockCount = 0;
+unsigned long lastKnockMs = 0;
+
+// Callback for MQTT (not used but required)
+void callback(char* topic, byte* payload, unsigned int length) {
+  // Not subscribing to anything, so this won't be called
+}
+
+// Send all LEDs off
+void send_all_off() {
+  if (mqttClient.connected()) {
+    for(int pixel = 0; pixel < num_leds; pixel++) {
+      RGBpayload[pixel * 3 + 0] = 1; // Red
+      RGBpayload[pixel * 3 + 1] = 1; // Green
+      RGBpayload[pixel * 3 + 2] = 1; // Blue
+    }
+    mqttClient.publish(mqtt_topic.c_str(), RGBpayload, payload_size);
+    Serial.println("All LEDs OFF");
+  }
+}
+
+// Send a single color to all LEDs
+void send_all_color(int r, int g, int b) {
+  if (mqttClient.connected()) {
+    for(int pixel = 0; pixel < num_leds; pixel++) {
+      RGBpayload[pixel * 3 + 0] = (byte)r; // Red
+      RGBpayload[pixel * 3 + 1] = (byte)g; // Green
+      RGBpayload[pixel * 3 + 2] = (byte)b; // Blue
+    }
+    mqttClient.publish(mqtt_topic.c_str(), RGBpayload, payload_size);
+    Serial.print("Published color: R=");
+    Serial.print(r);
+    Serial.print(" G=");
+    Serial.print(g);
+    Serial.print(" B=");
+    Serial.println(b);
+  }
+}
+
+// Non-blocking wait that services MQTT
+void waitWithMQTT(unsigned long ms) {
+  unsigned long start = millis();
+  while (millis() - start < ms) {
+    mqttClient.loop();
+    delay(5);
+  }
+}
+
+void startWifi() {
+  WiFi.disconnect();
+  Serial.print("Connecting to WiFi: ");
+  Serial.println(WIFI_SSID);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+
+  unsigned long t0 = millis();
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(250);
+    Serial.print('.');
+    if (millis() - t0 > 20000) {
+      Serial.println("\nWiFi retry...");
+      WiFi.begin(WIFI_SSID, WIFI_PASS);
+      t0 = millis();
+    }
+  }
+  Serial.print("\nWiFi connected. IP: ");
+  Serial.println(WiFi.localIP());
+}
+
+void reconnectMQTT() {
+  if (mqttClient.connected()) return;
+
+  // Print MAC address for unique client ID
+  byte mac[6];
+  WiFi.macAddress(mac);
+  String clientId = "MKR1010-";
+  for (int i = 0; i < 6; i++) {
+    clientId += String(mac[i], HEX);
+  }
+
+  Serial.print("Connecting to MQTT: ");
+  Serial.println(mqtt_server);
+
+  while (!mqttClient.connected()) {
+    if (mqttClient.connect(clientId.c_str(), mqtt_username, mqtt_password)) {
+      Serial.println("MQTT connected.");
+      break;
+    } else {
+      Serial.print("MQTT failed, rc=");
+      Serial.print(mqttClient.state());
+      Serial.println(" (retrying in 2s)");
+      delay(2000);
+    }
+  }
+}
+
+// Run color sequence: Blue → Red → Green (VERY QUICK)
+void runColorSequence() {
+  Serial.println("\n========================================");
+  Serial.println("!!! TRIGGERING QUICK COLOR SEQUENCE !!!");
+  Serial.println("========================================");
+  
+  // Blue
+  Serial.println(">> Sending BLUE");
+  send_all_color(0, 0, 255);
+  waitWithMQTT(COLOR_HOLD_MS);
+  
+  // Red
+  Serial.println(">> Sending RED");
+  send_all_color(255, 0, 0);
+  waitWithMQTT(COLOR_HOLD_MS);
+  
+  // Green
+  Serial.println(">> Sending GREEN");
+  send_all_color(0, 255, 0);
+  waitWithMQTT(COLOR_HOLD_MS);
+  
+  // Turn off
+  Serial.println(">> Turning OFF");
+  send_all_off();
+  
+  Serial.println("========================================");
+  Serial.println("Sequence complete! Ready for next 3 knocks");
+  Serial.println("========================================\n");
+}
+
+// Detect a single knock spike over baseline
+bool detectKnock() {
+  int sample = analogRead(MIC_PIN);
+  // Update baseline (EMA)
+  baseline = (1.0f - BASELINE_ALPHA) * baseline + BASELINE_ALPHA * sample;
+
+  int delta = abs(sample - (int)baseline);
+  bool isSpike = (delta >= THRESHOLD);
+
+  // Debug output - shows continuous readings
+  if (DEBUG_MIC) {
+    static unsigned long lastPrint = 0;
+    if (millis() - lastPrint > 200) {  // Print every 200ms
+      Serial.print("Mic: ");
+      Serial.print(sample);
+      Serial.print(" | Baseline: ");
+      Serial.print((int)baseline);
+      Serial.print(" | Delta: ");
+      Serial.print(delta);
+      Serial.print(" | Threshold: ");
+      Serial.print(THRESHOLD);
+      Serial.println();
+      lastPrint = millis();
+    }
+  }
+
+  // Brief blink on spike for debugging
+  if (isSpike) {
+    digitalWrite(LED_PIN, LOW);  // Brief off to show spike
+    Serial.println("\n>>> KNOCK SPIKE DETECTED! <<<\n");
+    delay(10);
+    digitalWrite(LED_PIN, HIGH); // Back on
+  }
+
+  return isSpike;
+}
+
+// Wait for EXACTLY 3 quickly timed knocks
+bool threeKnocksDetected() {
+  unsigned long now = millis();
+  bool spike = detectKnock();
+
+  if (spike) {
+    // Debounce - ignore too-fast repeats
+    if (now - lastKnockMs < DEBOUNCE_MS) {
+      Serial.println("   [Debounce - ignoring]");
+      return false;
+    }
+
+    // First knock or valid timing window?
+    if (knockCount == 0) {
+      knockCount = 1;
+      lastKnockMs = now;
+      Serial.println("==> KNOCK 1/3 detected");
+    } else {
+      unsigned long gap = now - lastKnockMs;
+      Serial.print("   Gap since last knock: ");
+      Serial.print(gap);
+      Serial.println("ms");
+      
+      if (gap >= MIN_GAP_MS && gap <= MAX_GAP_MS) {
+        knockCount++;
+        lastKnockMs = now;
+        Serial.print("==> KNOCK ");
+        Serial.print(knockCount);
+        Serial.println("/3 detected");
+      } else {
+        // Bad timing → reset to 1 (this spike starts a new sequence)
+        knockCount = 1;
+        lastKnockMs = now;
+        Serial.print("   [Timing invalid: ");
+        if (gap < MIN_GAP_MS) {
+          Serial.println("too fast - resetting]");
+        } else {
+          Serial.println("too slow - resetting]");
+        }
+        Serial.println("==> KNOCK 1/3 detected (new sequence)");
+      }
+    }
+  } else {
+    // Timeout the chain if user paused too long
+    if (knockCount > 0 && (now - lastKnockMs) > MAX_GAP_MS) {
+      Serial.print("   [Sequence timed out after ");
+      Serial.print(knockCount);
+      Serial.println(" knock(s) - NOT ENOUGH - resetting]");
+      knockCount = 0;
+    }
+  }
+
+  // Check if we have EXACTLY 3 knocks
+  if (knockCount == REQUIRED_KNOCKS) {
+    knockCount = 0; // reset for next time
+    Serial.println("\n*** EXACTLY 3 KNOCKS CONFIRMED! TRIGGERING LIGHTS! ***\n");
+    return true;
+  }
+  return false;
+}
+
+void setup() {
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, HIGH); // LED ON from start
+  analogReadResolution(10); // 0..1023 on MKR boards
+  
+  Serial.begin(115200);
+  delay(2000); // Give time for Serial to initialize
+  
+  Serial.println("\n\n=================================");
+  Serial.println("MAX4466 3-Knock → Vespera Control");
+  Serial.println("=================================");
+  Serial.print("Controlling Vespera Light #");
+  Serial.println(lightId);
+  Serial.println("LED: ON (system active)");
+  Serial.println();
+  
+  // Print MAC address
+  byte mac[6];
+  WiFi.macAddress(mac);
+  Serial.print("MAC address: ");
+  for (int i = 5; i >= 0; i--) {
+    if (mac[i] < 16) Serial.print("0");
+    Serial.print(mac[i], HEX);
+    if (i > 0) Serial.print(":");
+  }
+  Serial.println("\n");
+  
+  // Connect to WiFi
+  startWifi();
+  
+  // Setup MQTT
+  mqttClient.setServer(mqtt_server, mqtt_port);
+  mqttClient.setBufferSize(2000);
+  mqttClient.setCallback(callback);
+  reconnectMQTT();
+  
+  // Initialize all LEDs to off
+  send_all_off();
+  
+  Serial.println("\n=================================");
+  Serial.println("Setup complete!");
+  Serial.println("=================================");
+  Serial.println("DEBUG MODE ENABLED");
+  Serial.print("Knock Threshold: ");
+  Serial.println(THRESHOLD);
+  Serial.print("Min gap between knocks: ");
+  Serial.print(MIN_GAP_MS);
+  Serial.println("ms");
+  Serial.print("Max gap between knocks: ");
+  Serial.print(MAX_GAP_MS);
+  Serial.println("ms");
+  Serial.print("Color display time: ");
+  Serial.print(COLOR_HOLD_MS);
+  Serial.println("ms (VERY QUICK)");
+  Serial.println("\n*** IMPORTANT ***");
+  Serial.println("- ONLY 3 knocks will trigger display");
+  Serial.println("- 1 or 2 knocks will NOT trigger");
+  Serial.println("- IMMEDIATE display, NO cooldown");
+  Serial.println("=================================");
+  Serial.println("\nWatching for EXACTLY 3 quick knocks...");
+  Serial.println("You should see mic readings below:");
+  Serial.println("=================================\n");
+  
+  // Seed random for any future use
+  randomSeed(analogRead(A1));
+}
+
+void loop() {
+  // Ensure connections are active
+  if (WiFi.status() != WL_CONNECTED) {
+    startWifi();
+  }
+  
+  if (!mqttClient.connected()) {
+    reconnectMQTT();
+  }
+  
+  mqttClient.loop();
+
+  // Check for EXACTLY 3-knock pattern
+  if (threeKnocksDetected()) {
+    runColorSequence();
+    digitalWrite(LED_PIN, HIGH); // Ensure LED is back on after sequence
+    // Ready immediately for next 3 knocks - NO cooldown
+  }
+
+  delay(2); // Small delay to prevent overwhelming the loop
+}
